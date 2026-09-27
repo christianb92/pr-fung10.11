@@ -600,19 +600,12 @@ input[type=range]{width:100%;accent-color:var(--accent);}
   </div>
 
   <!-- Toggles -->
-    <!-- Toggles - PERFEKT VERSION -->
   <div class="card" style="margin-bottom:10px;">
     <span class="sec-label">⚙️ Optionen</span>
     <button class="toggle-btn on" id="autoSpeakToggle" style="margin-bottom:8px;">
       <span class="t-icon">🔊</span>
       <span class="t-label">Auto-Vorlesen</span>
       <span class="t-state" id="autoSpeakState">An</span>
-    </button>
-
-    <button class="toggle-btn on" id="learnerToggle" style="margin-bottom:8px; background:var(--accent-l); border-color:var(--accent);">
-      <span class="t-icon">🎓</span>
-      <span class="t-label">Anfänger-Modus (langsam + tolerant)</span>
-      <span class="t-state" id="learnerState">An</span>
     </button>
 
     <button class="toggle-btn on" id="repeatToggle" style="margin-bottom:8px;">
@@ -633,8 +626,6 @@ input[type=range]{width:100%;accent-color:var(--accent);}
       <span class="t-state" id="freeState">Aus</span>
     </button>
   </div>
-
-
 
   <button class="btn-start" id="btnStart">🚀 Session starten</button>
 </div>
@@ -8965,9 +8956,6 @@ function sndWrong(){tone([392],0.11,0);tone([311.1],0.16,0.09);}
 
 // ── TTS ────────────────────────────────────────────────────────
 let ttsV=[];
-let learnerMode = localStorage.getItem('learnerMode')===null ? true : localStorage.getItem('learnerMode')==='1';
-let ttsRate = 0.82;
-let ttsPitch = 1.02;
 function loadVoices(){ttsV=speechSynthesis.getVoices();}
 if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoices;}
 // Bekannte, besonders natürlich klingende Stimmen (Apple/iOS + Google/Android
@@ -8975,73 +8963,49 @@ if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoic
 // werden bevorzugt gesucht, bevor auf irgendeine x-beliebige Stimme
 // zurückgefallen wird — sonst landet man leicht bei einer robotischen.
 const PREFERRED_VOICE_NAMES = {
-  en: [
-    'Google US English','Google UK English Female','Google UK English Male',
-    'Samantha','Ava','Aria','Jenny','Natasha','Zira','Microsoft Zira',
-    'Karen','Moira','Tessa','Serena','Daniel','Alex','Oliver',
-    'Natural','Premium','Enhanced'
-  ],
+  en: ['Google US English','Google UK English Female','Google UK English Male','Samantha','Ava','Aria','Jenny','Natasha','Zira','Microsoft Zira Natural','Karen','Moira','Tessa','Serena','Daniel','Natural','Premium','Enhanced'],
   de: ['Anna','Petra','Helena','Markus','Google Deutsch','Viktoria','Natural','Premium']
 };
 function bestVoice(lang){
   if(!ttsV.length)loadVoices();
   const isEn=lang.startsWith('en');
   const names=isEn?PREFERRED_VOICE_NAMES.en:PREFERRED_VOICE_NAMES.de;
-  // 1) Premium/Natural Stimmen zuerst - klingen viel besser
+  // 1) Nach bekanntem Namen suchen (höchste Qualität)
   for(const name of names){
-    const v=ttsV.find(v=> (v.name===name || v.name.includes(name)) && v.lang.toLowerCase().startsWith(lang.slice(0,2).toLowerCase()));
-    if(v) return v;
+    const v=ttsV.find(v=>v.name===name || v.name.includes(name));
+    if(v)return v;
   }
-  // 2) Enhanced/Premium/Natural im Namen
-  const pref=isEn?['en-US','en-GB','en-AU']:['de-DE','de-AT','de-CH'];
+  // 2) Stimmen mit "Enhanced"/"Premium" im Namen bevorzugen (iOS-Kennzeichnung)
+  const pref=isEn?['en-GB','en-US','en-AU']:['de-DE','de-AT','de-CH'];
   for(const c of pref){
-    const enhanced=ttsV.find(v=>v.lang===c && /enhanced|premium|natural/i.test(v.name));
-    if(enhanced) return enhanced;
+    const enhanced=ttsV.find(v=>v.lang===c&&/enhanced|premium/i.test(v.name));
+    if(enhanced)return enhanced;
   }
-  // 3) Google Stimmen bevorzugen (beste Qualität auf Android)
-  for(const c of pref){
-    const google=ttsV.find(v=>v.lang===c && /google/i.test(v.name));
-    if(google) return google;
-  }
-  // 4) Erste mit passendem Code
+  // 3) Erste Stimme mit passendem Sprachcode
   for(const c of pref){const v=ttsV.find(v=>v.lang===c);if(v)return v;}
-  return ttsV.find(v=>v.lang.toLowerCase().startsWith(lang.slice(0,2).toLowerCase()))||null;
+  return ttsV.find(v=>v.lang.startsWith(lang.slice(0,2)))||null;
 }
-
-
-
-// duplicate removed
- // NEU: Anfänger-Modus für dich
-// duplicate removed
- // langsamer für Lerner
-// duplicate removed
-
-
-function speak(text,lang,onDone,slowRepeat=false){
+function speak(text,lang,onDone){
   if(!text||!window.speechSynthesis){if(onDone)onDone();return;}
-  try{ stopRec(); }catch(e){}
+  // KRITISCHER FIX: Mikrofon-Erkennung IMMER zuerst stoppen, bevor
+  // überhaupt gesprochen wird. Vorher gab es im ganzen Antwort-Ablauf
+  // (handleCheck → afterFeedback → speak) keinen einzigen expliziten
+  // stopRec()-Aufruf — auf Geräten/Browsern, bei denen SpeechRecognition
+  // nicht zuverlässig von selbst sofort stoppt (bekannte iOS-Safari-
+  // Eigenheit), konnte das Mikro dadurch während der eigenen
+  // Sprachausgabe weiterlaufen und diese direkt wieder aufnehmen — das
+  // verfälschte dann die NÄCHSTE Erkennung, unabhängig davon, wie klar
+  // man selbst gesprochen hat. Das dürfte der eigentliche Hauptgrund für
+  // die anhaltend schlechte Erkennung gewesen sein.
+  stopRec();
   speechSynthesis.cancel();
   setTimeout(()=>{
     const u=new SpeechSynthesisUtterance(text);
-    u.lang=lang;
-    if(lang.startsWith('en')){
-      u.rate = slowRepeat ? 0.62 : (learnerMode ? 0.78 : 0.92);
-      u.pitch = 1.02;
-      u.volume = 1.0;
-    } else {
-      u.rate = 0.90;
-      u.pitch = 0.98;
-    }
-    try{ const v=bestVoice(lang);if(v)u.voice=v; }catch(e){}
+    u.lang=lang;u.rate=0.78;u.pitch=1.02;
+    const v=bestVoice(lang);if(v)u.voice=v;
     u.onend=u.onerror=()=>{if(onDone)onDone();};
-    try{ speechSynthesis.speak(u); }catch(e){ if(onDone)onDone(); }
-  },80);
-}
-
-function speakSlowTwice(text,lang,onDone){
-  speak(text,lang,()=>{
-    setTimeout(()=>speak(text,lang,onDone,true), 700);
-  });
+    speechSynthesis.speak(u);
+  },60);
 }
 function speakCard(card,onDone){
   // Wort + Beispielsatz als ein Utterance
@@ -9501,19 +9465,18 @@ function levAccent(a,b){
 // war, dass korrekt gesprochene Wörter zu oft als falsch gewertet
 // wurden. Getipptes bleibt bei der strengen 1-Buchstabe-Regel.
 function typos(len,lenient){
-  if(learnerMode){
-    if(lenient){
-      if(len<=3) return 1;
-      if(len<=6) return 2;
-      if(len<=10) return 3;
-      return 4;
-    }
-    if(len<=2) return 0;
-    if(len<=5) return 1;
-    return 2;
+  // PERFEKT für Englisch-Anfänger mit nicht perfekter Aussprache
+  if(lenient){
+    // Spracheingabe: sehr tolerant
+    if(len<=3) return 1;
+    if(len<=6) return 2;
+    if(len<=10) return 3;
+    return 4;
   }
-  if(lenient) return len<=3?1:2;
-  return len<=2?0:1;
+  // Tippen: etwas toleranter als vorher
+  if(len<=2) return 0;
+  if(len<=5) return 1;
+  return 2;
 }
 
 function fuzzy(input,target,lenient){
@@ -9607,36 +9570,23 @@ function showSentenceDiff(input, target, targetWord){
   }
 }
 
-function checkSentence(input, target, viaVoice){
-  const n=s=>s.toLowerCase().replace(/\(.*?\)/g,'').replace(/[.,!?;:()\-'"]/g,'').trim();
-  const a=n(input), b=n(target);
-  if(!a||!b) return false;
-  // NEU: Im Anfänger-Modus viel toleranter
-  const minOverlap = learnerMode ? 0.5 : 0.6;
-  const allowMissing = learnerMode ? 2 : 1;
-  
-  const aWords=a.split(/\s+/).filter(Boolean);
-  const bWords=b.split(/\s+/).filter(Boolean);
-  if(!bWords.length) return false;
-  
-  let matched=0;
-  const pool=[...aWords];
-  for(const bw of bWords){
-    const tol=typos(bw.length, viaVoice);
-    let found=false;
-    for(let i=0;i<pool.length;i++){
-      if(levAccent(n(pool[i]), bw) <= tol){
-        matched++;
-        pool.splice(i,1);
-        found=true;
-        break;
-      }
-    }
-  }
-  const overlap=matched / bWords.length;
-  // Erlaube fehlende Artikel etc im Anfänger-Modus
-  return overlap >= minOverlap || (learnerMode && matched >= bWords.length - allowMissing);
-}}
+function checkSentence(input,exEn,lenient){
+  // Prüfung mit Typo-Toleranz für jedes Wort. Ausnahme: bis zu 2 kurze
+  // Funktionswörter (a/an/the/is/to etc. ≤3 Buchstaben) dürfen ganz
+  // fehlen, weil Spracherkennung diese oft verschluckt — besonders bei
+  // längeren Sätzen kommt das öfter als nur einmal vor.
+  const n=s=>s.toLowerCase().replace(/\(.*?\)/g,'').replace(/[.,!?;:()'"\-]/g,'').trim();
+  const sw=n(input).split(/\s+/).filter(Boolean);
+  const tw=n(exEn).split(/\s+/).filter(Boolean);
+  if(!tw.length)return false;
+  if(!sw.length)return false;
+
+  const pool=[...sw];
+  const missed=[];
+  for(const t of tw){
+    const tol=typos(t.length,lenient);
+    let best=-1,bestD=Infinity;
+    for(let i=0;i<pool.length;i++){const d=levAccent(t,pool[i]);if(d<bestD){bestD=d;best=i;}}
     if(best>=0&&bestD<=tol){pool.splice(best,1);}
     else missed.push(t);
   }
@@ -10820,42 +10770,6 @@ g('autoSpeakToggle').addEventListener('click',()=>{
   if(!autoSpeak&&window.speechSynthesis)speechSynthesis.cancel();
 });
 
-// PERFEKT: Anfänger-Modus Toggle - einfach An/Aus
-function updLearner(){
-  try{
-    const btn=document.getElementById('learnerToggle');
-    if(!btn) return;
-    btn.classList.toggle('on',learnerMode);
-    document.getElementById('learnerState').textContent=learnerMode?'An':'Aus';
-  }catch(e){}
-}
-const learnerBtn=document.getElementById('learnerToggle');
-if(learnerBtn){
-  learnerBtn.addEventListener('click',()=>{
-    learnerMode=!learnerMode;
-    localStorage.setItem('learnerMode', learnerMode?'1':'0');
-    updLearner();
-  });
-}
-
-
-
-
-// Override bestVoice to respect user selection
-let _originalBestVoice = bestVoice;
-let originalBestVoiceFn = bestVoice;
-bestVoice = function(lang){
-  try{
-    const saved=localStorage.getItem('selectedVoice');
-    if(saved && lang && lang.startsWith('en')){
-      const v=ttsV.find(v=>v.name===saved);
-      if(v) return v;
-    }
-    return originalBestVoiceFn ? originalBestVoiceFn(lang) : ( _originalBestVoice ? _originalBestVoice(lang) : null);
-  }catch(e){ return originalBestVoiceFn ? originalBestVoiceFn(lang) : null; }
-};
-
-
 // Repeat toggle
 function updRPT(){
   g('repeatToggle').classList.toggle('on',repeatSentence);
@@ -11211,12 +11125,6 @@ dirWeight=loadI(DW,50);
 g('dirSlider').value=dirWeight;
 g('dirPct').textContent=dirWeight+'%';
 autoSpeak=loadB(ASP);updASP();
-try{
-  let _lm = localStorage.getItem('learnerMode');
-  if(_lm===null) learnerMode=true; else learnerMode=loadB('learnerMode');
-  if(typeof updLearner==='function') updLearner();
-  setTimeout(()=>{ try{ if(typeof initVoiceSettings==='function') initVoiceSettings(); }catch(e){ console.log('voice init error',e); } }, 500);
-}catch(e){ console.log('learner init error',e); learnerMode=true; }
 repeatSentence=loadB(RPT);updRPT();
 mcMode=loadB(MCK);updMC();
 freeMode=loadB(FRK);updFree();
