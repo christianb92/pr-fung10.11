@@ -600,6 +600,7 @@ input[type=range]{width:100%;accent-color:var(--accent);}
   </div>
 
   <!-- Toggles -->
+    <!-- Toggles - PERFEKT VERSION -->
   <div class="card" style="margin-bottom:10px;">
     <span class="sec-label">⚙️ Optionen</span>
     <button class="toggle-btn on" id="autoSpeakToggle" style="margin-bottom:8px;">
@@ -610,20 +611,9 @@ input[type=range]{width:100%;accent-color:var(--accent);}
 
     <button class="toggle-btn on" id="learnerToggle" style="margin-bottom:8px; background:var(--accent-l); border-color:var(--accent);">
       <span class="t-icon">🎓</span>
-      <span class="t-label">Anfänger-Modus (tolerant + langsam)</span>
+      <span class="t-label">Anfänger-Modus (langsam + tolerant)</span>
       <span class="t-state" id="learnerState">An</span>
     </button>
-
-    <div id="voiceSettings" style="margin:8px 0; padding:10px; background:var(--card2); border-radius:8px;">
-      <div style="font-size:12px; font-weight:600; margin-bottom:6px;">🔊 Stimme & Geschwindigkeit</div>
-      <select id="voiceSelect" style="width:100%; padding:6px; border-radius:6px; margin-bottom:8px; font-size:13px;"></select>
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-        <span style="font-size:12px; min-width:80px;">Geschwindigkeit:</span>
-        <input type="range" id="rateSlider" min="0.5" max="1.2" step="0.05" value="0.82" style="flex:1;">
-        <span id="rateVal" style="font-size:12px; min-width:30px;">0.82x</span>
-      </div>
-      <button id="testVoiceBtn" style="padding:6px 12px; font-size:12px; border-radius:6px; background:var(--accent); color:white; border:none; cursor:pointer;">🔊 Stimme testen</button>
-    </div>
 
     <button class="toggle-btn on" id="repeatToggle" style="margin-bottom:8px;">
       <span class="t-icon">🔁</span>
@@ -643,6 +633,8 @@ input[type=range]{width:100%;accent-color:var(--accent);}
       <span class="t-state" id="freeState">Aus</span>
     </button>
   </div>
+
+
 
   <button class="btn-start" id="btnStart">🚀 Session starten</button>
 </div>
@@ -8973,6 +8965,9 @@ function sndWrong(){tone([392],0.11,0);tone([311.1],0.16,0.09);}
 
 // ── TTS ────────────────────────────────────────────────────────
 let ttsV=[];
+let learnerMode = localStorage.getItem('learnerMode')===null ? true : localStorage.getItem('learnerMode')==='1';
+let ttsRate = 0.82;
+let ttsPitch = 1.02;
 function loadVoices(){ttsV=speechSynthesis.getVoices();}
 if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoices;}
 // Bekannte, besonders natürlich klingende Stimmen (Apple/iOS + Google/Android
@@ -9013,38 +9008,33 @@ function bestVoice(lang){
   return ttsV.find(v=>v.lang.toLowerCase().startsWith(lang.slice(0,2).toLowerCase()))||null;
 }
 
-function getAllEnglishVoices(){
-  if(!ttsV.length)loadVoices();
-  return ttsV.filter(v=>v.lang.toLowerCase().startsWith('en')).sort((a,b)=>a.name.localeCompare(b.name));
-}
 
-let learnerMode = loadB('learnerMode') ?? true; // NEU: Anfänger-Modus für dich
-let ttsRate = parseFloat(localStorage.getItem('ttsRate') || '0.82'); // langsamer für Lerner
-let ttsPitch = parseFloat(localStorage.getItem('ttsPitch') || '1.02');
+
+// duplicate removed
+ // NEU: Anfänger-Modus für dich
+// duplicate removed
+ // langsamer für Lerner
+// duplicate removed
+
 
 function speak(text,lang,onDone,slowRepeat=false){
   if(!text||!window.speechSynthesis){if(onDone)onDone();return;}
-  stopRec();
+  try{ stopRec(); }catch(e){}
   speechSynthesis.cancel();
   setTimeout(()=>{
     const u=new SpeechSynthesisUtterance(text);
     u.lang=lang;
-    // NEU: Für Englisch-Lerner viel langsamer und natürlicher
     if(lang.startsWith('en')){
-      u.rate = slowRepeat ? 0.65 : (learnerMode ? ttsRate : 0.92);
-      u.pitch = slowRepeat ? 0.95 : ttsPitch;
+      u.rate = slowRepeat ? 0.62 : (learnerMode ? 0.78 : 0.92);
+      u.pitch = 1.02;
       u.volume = 1.0;
     } else {
-      u.rate = 0.92;
+      u.rate = 0.90;
       u.pitch = 0.98;
     }
-    const v=bestVoice(lang);if(v)u.voice=v;
-    // Bessere Pausen für Verständnis
-    if(text.length>60){
-      u.text = text.replace(/\. /g, '.   ').replace(/, /g, ', ');
-    }
+    try{ const v=bestVoice(lang);if(v)u.voice=v; }catch(e){}
     u.onend=u.onerror=()=>{if(onDone)onDone();};
-    speechSynthesis.speak(u);
+    try{ speechSynthesis.speak(u); }catch(e){ if(onDone)onDone(); }
   },80);
 }
 
@@ -9511,21 +9501,17 @@ function levAccent(a,b){
 // war, dass korrekt gesprochene Wörter zu oft als falsch gewertet
 // wurden. Getipptes bleibt bei der strengen 1-Buchstabe-Regel.
 function typos(len,lenient){
-  // NEU: Viel toleranter für Englisch-Anfänger mit Akzent
   if(learnerMode){
     if(lenient){
-      // Spracheingabe im Anfänger-Modus: sehr tolerant
       if(len<=3) return 1;
       if(len<=6) return 2;
       if(len<=10) return 3;
       return 4;
     }
-    // Tippen im Anfänger-Modus: etwas toleranter
     if(len<=2) return 0;
     if(len<=5) return 1;
     return 2;
   }
-  // Original strenge Prüfung für Fortgeschrittene
   if(lenient) return len<=3?1:2;
   return len<=2?0:1;
 }
@@ -10834,119 +10820,39 @@ g('autoSpeakToggle').addEventListener('click',()=>{
   if(!autoSpeak&&window.speechSynthesis)speechSynthesis.cancel();
 });
 
-// NEU: Anfänger-Modus Toggle
+// PERFEKT: Anfänger-Modus Toggle - einfach An/Aus
 function updLearner(){
-  const btn=g('learnerToggle');
-  if(!btn) return;
-  btn.classList.toggle('on',learnerMode);
-  g('learnerState').textContent=learnerMode?'An':'Aus';
-  if(learnerMode){
-    ttsRate=0.82;
-    localStorage.setItem('ttsRate','0.82');
-    const slider=g('rateSlider');
-    if(slider) slider.value='0.82';
-    const rateVal=g('rateVal');
-    if(rateVal) rateVal.textContent='0.82x';
-  }
+  try{
+    const btn=document.getElementById('learnerToggle');
+    if(!btn) return;
+    btn.classList.toggle('on',learnerMode);
+    document.getElementById('learnerState').textContent=learnerMode?'An':'Aus';
+  }catch(e){}
 }
-const learnerBtn=g('learnerToggle');
+const learnerBtn=document.getElementById('learnerToggle');
 if(learnerBtn){
   learnerBtn.addEventListener('click',()=>{
     learnerMode=!learnerMode;
     localStorage.setItem('learnerMode', learnerMode?'1':'0');
-    saveAny('learnerMode', learnerMode?'1':'0');
     updLearner();
-    showRepStatus(learnerMode?'🎓 Anfänger-Modus: tolerant + langsam':'🎯 Fortgeschritten-Modus: streng + normal', 'info');
-    setTimeout(hideRepStatus, 2500);
   });
 }
 
-// NEU: Voice Selector
-function populateVoices(){
-  const sel=g('voiceSelect');
-  if(!sel) return;
-  const voices=getAllEnglishVoices();
-  sel.innerHTML='';
-  const savedVoice=localStorage.getItem('selectedVoice')||'';
-  voices.forEach(v=>{
-    const opt=document.createElement('option');
-    opt.value=v.name;
-    opt.textContent=`${v.name} (${v.lang}) ${/natural|premium|enhanced/i.test(v.name)?'⭐':''}`;
-    if(v.name===savedVoice) opt.selected=true;
-    sel.appendChild(opt);
-  });
-  // If no saved, select best
-  if(!savedVoice && voices.length){
-    const best=bestVoice('en-US');
-    if(best){
-      sel.value=best.name;
-    }
-  }
-}
 
-function initVoiceSettings(){
-  populateVoices();
-  if(window.speechSynthesis){
-    speechSynthesis.onvoiceschanged=populateVoices;
-    setTimeout(populateVoices, 500);
-  }
-  const sel=g('voiceSelect');
-  if(sel){
-    sel.addEventListener('change',()=>{
-      localStorage.setItem('selectedVoice', sel.value);
-      // Override bestVoice to use selected
-      const originalBestVoice=bestVoice;
-      // test immediately
-      const voices=ttsV;
-      const chosen=voices.find(v=>v.name===sel.value);
-      if(chosen){
-        const u=new SpeechSynthesisUtterance('Hello, this is your new voice for learning English. It sounds much more natural now.');
-        u.voice=chosen;
-        u.lang='en-US';
-        u.rate=ttsRate;
-        u.pitch=ttsPitch;
-        speechSynthesis.cancel();
-        speechSynthesis.speak(u);
-      }
-    });
-  }
-  const rateSlider=g('rateSlider');
-  if(rateSlider){
-    rateSlider.value=ttsRate;
-    g('rateVal').textContent=ttsRate+'x';
-    rateSlider.addEventListener('input',(e)=>{
-      ttsRate=parseFloat(e.target.value);
-      localStorage.setItem('ttsRate', ttsRate);
-      g('rateVal').textContent=ttsRate+'x';
-    });
-  }
-  const testBtn=g('testVoiceBtn');
-  if(testBtn){
-    testBtn.addEventListener('click',()=>{
-      const sel=g('voiceSelect');
-      const voices=ttsV;
-      let chosen=null;
-      if(sel && sel.value){
-        chosen=voices.find(v=>v.name===sel.value);
-      }
-      if(!chosen) chosen=bestVoice('en-US');
-      if(chosen){
-        const testText=learnerMode ? 'Hello! I am learning English. This voice is much clearer and slower for beginners.' : 'Hello, this is a test of the English voice.';
-        speak(testText, 'en-US', null, false);
-      }
-    });
-  }
-}
+
 
 // Override bestVoice to respect user selection
-const _originalBestVoice = bestVoice;
+let _originalBestVoice = bestVoice;
+let originalBestVoiceFn = bestVoice;
 bestVoice = function(lang){
-  const saved=localStorage.getItem('selectedVoice');
-  if(saved && lang.startsWith('en')){
-    const v=ttsV.find(v=>v.name===saved);
-    if(v) return v;
-  }
-  return _originalBestVoice(lang);
+  try{
+    const saved=localStorage.getItem('selectedVoice');
+    if(saved && lang && lang.startsWith('en')){
+      const v=ttsV.find(v=>v.name===saved);
+      if(v) return v;
+    }
+    return originalBestVoiceFn ? originalBestVoiceFn(lang) : ( _originalBestVoice ? _originalBestVoice(lang) : null);
+  }catch(e){ return originalBestVoiceFn ? originalBestVoiceFn(lang) : null; }
 };
 
 
@@ -11305,10 +11211,12 @@ dirWeight=loadI(DW,50);
 g('dirSlider').value=dirWeight;
 g('dirPct').textContent=dirWeight+'%';
 autoSpeak=loadB(ASP);updASP();
-learnerMode=loadB('learnerMode');
-if(learnerMode===null||learnerMode===undefined) learnerMode=true;
-updLearner();
-setTimeout(initVoiceSettings, 300);
+try{
+  let _lm = localStorage.getItem('learnerMode');
+  if(_lm===null) learnerMode=true; else learnerMode=loadB('learnerMode');
+  if(typeof updLearner==='function') updLearner();
+  setTimeout(()=>{ try{ if(typeof initVoiceSettings==='function') initVoiceSettings(); }catch(e){ console.log('voice init error',e); } }, 500);
+}catch(e){ console.log('learner init error',e); learnerMode=true; }
 repeatSentence=loadB(RPT);updRPT();
 mcMode=loadB(MCK);updMC();
 freeMode=loadB(FRK);updFree();
