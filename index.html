@@ -608,6 +608,23 @@ input[type=range]{width:100%;accent-color:var(--accent);}
       <span class="t-state" id="autoSpeakState">An</span>
     </button>
 
+    <button class="toggle-btn on" id="learnerToggle" style="margin-bottom:8px; background:var(--accent-l); border-color:var(--accent);">
+      <span class="t-icon">🎓</span>
+      <span class="t-label">Anfänger-Modus (tolerant + langsam)</span>
+      <span class="t-state" id="learnerState">An</span>
+    </button>
+
+    <div id="voiceSettings" style="margin:8px 0; padding:10px; background:var(--card2); border-radius:8px;">
+      <div style="font-size:12px; font-weight:600; margin-bottom:6px;">🔊 Stimme & Geschwindigkeit</div>
+      <select id="voiceSelect" style="width:100%; padding:6px; border-radius:6px; margin-bottom:8px; font-size:13px;"></select>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span style="font-size:12px; min-width:80px;">Geschwindigkeit:</span>
+        <input type="range" id="rateSlider" min="0.5" max="1.2" step="0.05" value="0.82" style="flex:1;">
+        <span id="rateVal" style="font-size:12px; min-width:30px;">0.82x</span>
+      </div>
+      <button id="testVoiceBtn" style="padding:6px 12px; font-size:12px; border-radius:6px; background:var(--accent); color:white; border:none; cursor:pointer;">🔊 Stimme testen</button>
+    </div>
+
     <button class="toggle-btn on" id="repeatToggle" style="margin-bottom:8px;">
       <span class="t-icon">🔁</span>
       <span class="t-label">Satz nachsprechen</span>
@@ -8963,49 +8980,78 @@ if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoic
 // werden bevorzugt gesucht, bevor auf irgendeine x-beliebige Stimme
 // zurückgefallen wird — sonst landet man leicht bei einer robotischen.
 const PREFERRED_VOICE_NAMES = {
-  en: ['Samantha','Ava','Karen','Moira','Tessa','Serena','Daniel','Google US English','Google UK English Female'],
-  de: ['Anna','Petra','Helena','Markus','Google Deutsch','Viktoria']
+  en: [
+    'Google US English','Google UK English Female','Google UK English Male',
+    'Samantha','Ava','Aria','Jenny','Natasha','Zira','Microsoft Zira',
+    'Karen','Moira','Tessa','Serena','Daniel','Alex','Oliver',
+    'Natural','Premium','Enhanced'
+  ],
+  de: ['Anna','Petra','Helena','Markus','Google Deutsch','Viktoria','Natural','Premium']
 };
 function bestVoice(lang){
   if(!ttsV.length)loadVoices();
   const isEn=lang.startsWith('en');
   const names=isEn?PREFERRED_VOICE_NAMES.en:PREFERRED_VOICE_NAMES.de;
-  // 1) Nach bekanntem Namen suchen (höchste Qualität)
+  // 1) Premium/Natural Stimmen zuerst - klingen viel besser
   for(const name of names){
-    const v=ttsV.find(v=>v.name===name || v.name.includes(name));
-    if(v)return v;
+    const v=ttsV.find(v=> (v.name===name || v.name.includes(name)) && v.lang.toLowerCase().startsWith(lang.slice(0,2).toLowerCase()));
+    if(v) return v;
   }
-  // 2) Stimmen mit "Enhanced"/"Premium" im Namen bevorzugen (iOS-Kennzeichnung)
-  const pref=isEn?['en-GB','en-US','en-AU']:['de-DE','de-AT','de-CH'];
+  // 2) Enhanced/Premium/Natural im Namen
+  const pref=isEn?['en-US','en-GB','en-AU']:['de-DE','de-AT','de-CH'];
   for(const c of pref){
-    const enhanced=ttsV.find(v=>v.lang===c&&/enhanced|premium/i.test(v.name));
-    if(enhanced)return enhanced;
+    const enhanced=ttsV.find(v=>v.lang===c && /enhanced|premium|natural/i.test(v.name));
+    if(enhanced) return enhanced;
   }
-  // 3) Erste Stimme mit passendem Sprachcode
+  // 3) Google Stimmen bevorzugen (beste Qualität auf Android)
+  for(const c of pref){
+    const google=ttsV.find(v=>v.lang===c && /google/i.test(v.name));
+    if(google) return google;
+  }
+  // 4) Erste mit passendem Code
   for(const c of pref){const v=ttsV.find(v=>v.lang===c);if(v)return v;}
-  return ttsV.find(v=>v.lang.startsWith(lang.slice(0,2)))||null;
+  return ttsV.find(v=>v.lang.toLowerCase().startsWith(lang.slice(0,2).toLowerCase()))||null;
 }
-function speak(text,lang,onDone){
+
+function getAllEnglishVoices(){
+  if(!ttsV.length)loadVoices();
+  return ttsV.filter(v=>v.lang.toLowerCase().startsWith('en')).sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+let learnerMode = loadB('learnerMode') ?? true; // NEU: Anfänger-Modus für dich
+let ttsRate = parseFloat(localStorage.getItem('ttsRate') || '0.82'); // langsamer für Lerner
+let ttsPitch = parseFloat(localStorage.getItem('ttsPitch') || '1.02');
+
+function speak(text,lang,onDone,slowRepeat=false){
   if(!text||!window.speechSynthesis){if(onDone)onDone();return;}
-  // KRITISCHER FIX: Mikrofon-Erkennung IMMER zuerst stoppen, bevor
-  // überhaupt gesprochen wird. Vorher gab es im ganzen Antwort-Ablauf
-  // (handleCheck → afterFeedback → speak) keinen einzigen expliziten
-  // stopRec()-Aufruf — auf Geräten/Browsern, bei denen SpeechRecognition
-  // nicht zuverlässig von selbst sofort stoppt (bekannte iOS-Safari-
-  // Eigenheit), konnte das Mikro dadurch während der eigenen
-  // Sprachausgabe weiterlaufen und diese direkt wieder aufnehmen — das
-  // verfälschte dann die NÄCHSTE Erkennung, unabhängig davon, wie klar
-  // man selbst gesprochen hat. Das dürfte der eigentliche Hauptgrund für
-  // die anhaltend schlechte Erkennung gewesen sein.
   stopRec();
   speechSynthesis.cancel();
   setTimeout(()=>{
     const u=new SpeechSynthesisUtterance(text);
-    u.lang=lang;u.rate=0.92;u.pitch=0.95;
+    u.lang=lang;
+    // NEU: Für Englisch-Lerner viel langsamer und natürlicher
+    if(lang.startsWith('en')){
+      u.rate = slowRepeat ? 0.65 : (learnerMode ? ttsRate : 0.92);
+      u.pitch = slowRepeat ? 0.95 : ttsPitch;
+      u.volume = 1.0;
+    } else {
+      u.rate = 0.92;
+      u.pitch = 0.98;
+    }
     const v=bestVoice(lang);if(v)u.voice=v;
+    // Bessere Pausen für Verständnis
+    if(text.length>60){
+      u.text = text.replace(/\. /g, '.   ').replace(/, /g, ', ');
+    }
     u.onend=u.onerror=()=>{if(onDone)onDone();};
     speechSynthesis.speak(u);
-  },60);
+  },80);
+}
+
+function speakSlowTwice(text,lang,onDone){
+  speak(text,lang,()=>{
+    setTimeout(()=>speak(text,lang,onDone,true), 700);
+  });
 }
 function speakCard(card,onDone){
   // Wort + Beispielsatz als ein Utterance
@@ -9465,6 +9511,21 @@ function levAccent(a,b){
 // war, dass korrekt gesprochene Wörter zu oft als falsch gewertet
 // wurden. Getipptes bleibt bei der strengen 1-Buchstabe-Regel.
 function typos(len,lenient){
+  // NEU: Viel toleranter für Englisch-Anfänger mit Akzent
+  if(learnerMode){
+    if(lenient){
+      // Spracheingabe im Anfänger-Modus: sehr tolerant
+      if(len<=3) return 1;
+      if(len<=6) return 2;
+      if(len<=10) return 3;
+      return 4;
+    }
+    // Tippen im Anfänger-Modus: etwas toleranter
+    if(len<=2) return 0;
+    if(len<=5) return 1;
+    return 2;
+  }
+  // Original strenge Prüfung für Fortgeschrittene
   if(lenient) return len<=3?1:2;
   return len<=2?0:1;
 }
@@ -9560,23 +9621,36 @@ function showSentenceDiff(input, target, targetWord){
   }
 }
 
-function checkSentence(input,exEn,lenient){
-  // Prüfung mit Typo-Toleranz für jedes Wort. Ausnahme: bis zu 2 kurze
-  // Funktionswörter (a/an/the/is/to etc. ≤3 Buchstaben) dürfen ganz
-  // fehlen, weil Spracherkennung diese oft verschluckt — besonders bei
-  // längeren Sätzen kommt das öfter als nur einmal vor.
-  const n=s=>s.toLowerCase().replace(/\(.*?\)/g,'').replace(/[.,!?;:()'"\-]/g,'').trim();
-  const sw=n(input).split(/\s+/).filter(Boolean);
-  const tw=n(exEn).split(/\s+/).filter(Boolean);
-  if(!tw.length)return false;
-  if(!sw.length)return false;
-
-  const pool=[...sw];
-  const missed=[];
-  for(const t of tw){
-    const tol=typos(t.length,lenient);
-    let best=-1,bestD=Infinity;
-    for(let i=0;i<pool.length;i++){const d=levAccent(t,pool[i]);if(d<bestD){bestD=d;best=i;}}
+function checkSentence(input, target, viaVoice){
+  const n=s=>s.toLowerCase().replace(/\(.*?\)/g,'').replace(/[.,!?;:()\-'"]/g,'').trim();
+  const a=n(input), b=n(target);
+  if(!a||!b) return false;
+  // NEU: Im Anfänger-Modus viel toleranter
+  const minOverlap = learnerMode ? 0.5 : 0.6;
+  const allowMissing = learnerMode ? 2 : 1;
+  
+  const aWords=a.split(/\s+/).filter(Boolean);
+  const bWords=b.split(/\s+/).filter(Boolean);
+  if(!bWords.length) return false;
+  
+  let matched=0;
+  const pool=[...aWords];
+  for(const bw of bWords){
+    const tol=typos(bw.length, viaVoice);
+    let found=false;
+    for(let i=0;i<pool.length;i++){
+      if(levAccent(n(pool[i]), bw) <= tol){
+        matched++;
+        pool.splice(i,1);
+        found=true;
+        break;
+      }
+    }
+  }
+  const overlap=matched / bWords.length;
+  // Erlaube fehlende Artikel etc im Anfänger-Modus
+  return overlap >= minOverlap || (learnerMode && matched >= bWords.length - allowMissing);
+}}
     if(best>=0&&bestD<=tol){pool.splice(best,1);}
     else missed.push(t);
   }
@@ -10760,6 +10834,122 @@ g('autoSpeakToggle').addEventListener('click',()=>{
   if(!autoSpeak&&window.speechSynthesis)speechSynthesis.cancel();
 });
 
+// NEU: Anfänger-Modus Toggle
+function updLearner(){
+  const btn=g('learnerToggle');
+  if(!btn) return;
+  btn.classList.toggle('on',learnerMode);
+  g('learnerState').textContent=learnerMode?'An':'Aus';
+  if(learnerMode){
+    ttsRate=0.82;
+    localStorage.setItem('ttsRate','0.82');
+    const slider=g('rateSlider');
+    if(slider) slider.value='0.82';
+    const rateVal=g('rateVal');
+    if(rateVal) rateVal.textContent='0.82x';
+  }
+}
+const learnerBtn=g('learnerToggle');
+if(learnerBtn){
+  learnerBtn.addEventListener('click',()=>{
+    learnerMode=!learnerMode;
+    localStorage.setItem('learnerMode', learnerMode?'1':'0');
+    saveAny('learnerMode', learnerMode?'1':'0');
+    updLearner();
+    showRepStatus(learnerMode?'🎓 Anfänger-Modus: tolerant + langsam':'🎯 Fortgeschritten-Modus: streng + normal', 'info');
+    setTimeout(hideRepStatus, 2500);
+  });
+}
+
+// NEU: Voice Selector
+function populateVoices(){
+  const sel=g('voiceSelect');
+  if(!sel) return;
+  const voices=getAllEnglishVoices();
+  sel.innerHTML='';
+  const savedVoice=localStorage.getItem('selectedVoice')||'';
+  voices.forEach(v=>{
+    const opt=document.createElement('option');
+    opt.value=v.name;
+    opt.textContent=`${v.name} (${v.lang}) ${/natural|premium|enhanced/i.test(v.name)?'⭐':''}`;
+    if(v.name===savedVoice) opt.selected=true;
+    sel.appendChild(opt);
+  });
+  // If no saved, select best
+  if(!savedVoice && voices.length){
+    const best=bestVoice('en-US');
+    if(best){
+      sel.value=best.name;
+    }
+  }
+}
+
+function initVoiceSettings(){
+  populateVoices();
+  if(window.speechSynthesis){
+    speechSynthesis.onvoiceschanged=populateVoices;
+    setTimeout(populateVoices, 500);
+  }
+  const sel=g('voiceSelect');
+  if(sel){
+    sel.addEventListener('change',()=>{
+      localStorage.setItem('selectedVoice', sel.value);
+      // Override bestVoice to use selected
+      const originalBestVoice=bestVoice;
+      // test immediately
+      const voices=ttsV;
+      const chosen=voices.find(v=>v.name===sel.value);
+      if(chosen){
+        const u=new SpeechSynthesisUtterance('Hello, this is your new voice for learning English. It sounds much more natural now.');
+        u.voice=chosen;
+        u.lang='en-US';
+        u.rate=ttsRate;
+        u.pitch=ttsPitch;
+        speechSynthesis.cancel();
+        speechSynthesis.speak(u);
+      }
+    });
+  }
+  const rateSlider=g('rateSlider');
+  if(rateSlider){
+    rateSlider.value=ttsRate;
+    g('rateVal').textContent=ttsRate+'x';
+    rateSlider.addEventListener('input',(e)=>{
+      ttsRate=parseFloat(e.target.value);
+      localStorage.setItem('ttsRate', ttsRate);
+      g('rateVal').textContent=ttsRate+'x';
+    });
+  }
+  const testBtn=g('testVoiceBtn');
+  if(testBtn){
+    testBtn.addEventListener('click',()=>{
+      const sel=g('voiceSelect');
+      const voices=ttsV;
+      let chosen=null;
+      if(sel && sel.value){
+        chosen=voices.find(v=>v.name===sel.value);
+      }
+      if(!chosen) chosen=bestVoice('en-US');
+      if(chosen){
+        const testText=learnerMode ? 'Hello! I am learning English. This voice is much clearer and slower for beginners.' : 'Hello, this is a test of the English voice.';
+        speak(testText, 'en-US', null, false);
+      }
+    });
+  }
+}
+
+// Override bestVoice to respect user selection
+const _originalBestVoice = bestVoice;
+bestVoice = function(lang){
+  const saved=localStorage.getItem('selectedVoice');
+  if(saved && lang.startsWith('en')){
+    const v=ttsV.find(v=>v.name===saved);
+    if(v) return v;
+  }
+  return _originalBestVoice(lang);
+};
+
+
 // Repeat toggle
 function updRPT(){
   g('repeatToggle').classList.toggle('on',repeatSentence);
@@ -11115,6 +11305,10 @@ dirWeight=loadI(DW,50);
 g('dirSlider').value=dirWeight;
 g('dirPct').textContent=dirWeight+'%';
 autoSpeak=loadB(ASP);updASP();
+learnerMode=loadB('learnerMode');
+if(learnerMode===null||learnerMode===undefined) learnerMode=true;
+updLearner();
+setTimeout(initVoiceSettings, 300);
 repeatSentence=loadB(RPT);updRPT();
 mcMode=loadB(MCK);updMC();
 freeMode=loadB(FRK);updFree();
