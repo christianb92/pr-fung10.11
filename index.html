@@ -625,7 +625,20 @@ input[type=range]{width:100%;accent-color:var(--accent);}
       <span class="t-label">Eigene Sätze bilden (nur Vokabeln)</span>
       <span class="t-state" id="freeState">Aus</span>
     </button>
+  
+  <!-- NEU: Stimme besser machen - sichere extra Karte -->
+  <div class="card" style="margin-bottom:10px; border:1px solid var(--accent);">
+    <span class="sec-label">🔊 Stimme einstellen (wenn Roboter-Stimme)</span>
+    <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Falls die Stimme noch wie Roboter klingt, wähle hier eine natürlichere:</div>
+    <select id="voiceSelect" style="width:100%; padding:8px; border-radius:8px; margin-bottom:8px; font-size:13px; border:1px solid var(--border);"></select>
+    <div style="display:flex; gap:8px;">
+      <button id="testVoiceBtn" style="flex:1; padding:8px; font-size:13px; border-radius:8px; background:var(--accent); color:white; border:none; cursor:pointer;">🔊 Testen</button>
+      <button id="slowVoiceBtn" style="flex:1; padding:8px; font-size:13px; border-radius:8px; background:var(--card2); border:1px solid var(--border); cursor:pointer;">🐢 Extra langsam</button>
+    </div>
   </div>
+
+
+</div>
 
   <button class="btn-start" id="btnStart">🚀 Session starten</button>
 </div>
@@ -8963,8 +8976,8 @@ if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoic
 // werden bevorzugt gesucht, bevor auf irgendeine x-beliebige Stimme
 // zurückgefallen wird — sonst landet man leicht bei einer robotischen.
 const PREFERRED_VOICE_NAMES = {
-  en: ['Google US English','Google UK English Female','Google UK English Male','Samantha','Ava','Aria','Jenny','Natasha','Zira','Microsoft Zira Natural','Karen','Moira','Tessa','Serena','Daniel','Natural','Premium','Enhanced'],
-  de: ['Anna','Petra','Helena','Markus','Google Deutsch','Viktoria','Natural','Premium']
+  en: ['Google US English','Google UK English Female','Samantha','Ava','Aria','Jenny','Natasha','Zira','Microsoft Zira','Karen','Moira','Tessa','Serena','Daniel','Natural','Premium','Enhanced','Online'],
+  de: ['Anna','Petra','Helena','Markus','Google Deutsch','Viktoria','Natural']
 };
 function bestVoice(lang){
   if(!ttsV.length)loadVoices();
@@ -9001,7 +9014,7 @@ function speak(text,lang,onDone){
   speechSynthesis.cancel();
   setTimeout(()=>{
     const u=new SpeechSynthesisUtterance(text);
-    u.lang=lang;u.rate=0.78;u.pitch=1.02;
+    u.lang=lang;u.rate=0.70;u.pitch=1.08;
     const v=bestVoice(lang);if(v)u.voice=v;
     u.onend=u.onerror=()=>{if(onDone)onDone();};
     speechSynthesis.speak(u);
@@ -9465,15 +9478,12 @@ function levAccent(a,b){
 // war, dass korrekt gesprochene Wörter zu oft als falsch gewertet
 // wurden. Getipptes bleibt bei der strengen 1-Buchstabe-Regel.
 function typos(len,lenient){
-  // PERFEKT für Englisch-Anfänger mit nicht perfekter Aussprache
   if(lenient){
-    // Spracheingabe: sehr tolerant
     if(len<=3) return 1;
     if(len<=6) return 2;
     if(len<=10) return 3;
     return 4;
   }
-  // Tippen: etwas toleranter als vorher
   if(len<=2) return 0;
   if(len<=5) return 1;
   return 2;
@@ -11121,10 +11131,108 @@ g('btnCloseProgress').addEventListener('click',()=>{
 });
 
 // ── Init ───────────────────────────────────────────────────────
+
+// === NEU: Voice Selector - verbessert Stimme deutlich ===
+function getAllEnglishVoices(){
+  try{
+    if(!ttsV.length && window.speechSynthesis) ttsV=speechSynthesis.getVoices();
+    return ttsV.filter(v=>v.lang && v.lang.toLowerCase().startsWith('en')).sort((a,b)=>a.name.localeCompare(b.name));
+  }catch(e){ return []; }
+}
+function populateVoices(){
+  try{
+    const sel=document.getElementById('voiceSelect');
+    if(!sel) return;
+    const voices=getAllEnglishVoices();
+    if(!voices.length){
+      setTimeout(populateVoices, 500);
+      return;
+    }
+    sel.innerHTML='';
+    const saved=localStorage.getItem('selectedVoice')||'';
+    voices.forEach(v=>{
+      const opt=document.createElement('option');
+      opt.value=v.name;
+      const isNatural=/natural|premium|enhanced|google|zira|aria|jenny|neural|online/i.test(v.name);
+      opt.textContent=`${v.name} (${v.lang}) ${isNatural?'⭐ natürlich':''}`;
+      if(v.name===saved) opt.selected=true;
+      sel.appendChild(opt);
+    });
+    if(!saved && voices.length){
+      const best=bestVoice('en-US');
+      if(best) sel.value=best.name;
+    }
+  }catch(e){ console.log('voice error',e); }
+}
+function initVoiceSelector(){
+  try{
+    populateVoices();
+    if(window.speechSynthesis){
+      window.speechSynthesis.onvoiceschanged=populateVoices;
+      setTimeout(populateVoices, 600);
+    }
+    const sel=document.getElementById('voiceSelect');
+    if(sel){
+      sel.addEventListener('change',()=>{
+        localStorage.setItem('selectedVoice', sel.value);
+        const voices=ttsV;
+        const chosen=voices.find(v=>v.name===sel.value);
+        if(chosen){
+          const u=new SpeechSynthesisUtterance('Hello, this voice is much more natural for learning English!');
+          u.voice=chosen; u.lang='en-US'; u.rate=0.70; u.pitch=1.08;
+          speechSynthesis.cancel(); speechSynthesis.speak(u);
+        }
+      });
+    }
+    const testBtn=document.getElementById('testVoiceBtn');
+    if(testBtn){
+      testBtn.addEventListener('click',()=>{
+        const sel=document.getElementById('voiceSelect');
+        let chosen=null;
+        if(sel && sel.value) chosen=ttsV.find(v=>v.name===sel.value);
+        if(!chosen) chosen=bestVoice('en-US');
+        if(chosen){
+          const u=new SpeechSynthesisUtterance('Hello! I am learning English and this voice sounds much more natural and slower for beginners.');
+          u.voice=chosen; u.lang='en-US'; u.rate=0.70; u.pitch=1.08;
+          speechSynthesis.cancel(); speechSynthesis.speak(u);
+        }
+      });
+    }
+    const slowBtn=document.getElementById('slowVoiceBtn');
+    if(slowBtn){
+      slowBtn.addEventListener('click',()=>{
+        const sel=document.getElementById('voiceSelect');
+        let chosen=null;
+        if(sel && sel.value) chosen=ttsV.find(v=>v.name===sel.value);
+        if(!chosen) chosen=bestVoice('en-US');
+        if(chosen){
+          const u=new SpeechSynthesisUtterance('Extra slow. Hello. I. Am. Learning. English. Very. Slowly. For. Beginners.');
+          u.voice=chosen; u.lang='en-US'; u.rate=0.55; u.pitch=1.0;
+          speechSynthesis.cancel(); speechSynthesis.speak(u);
+        }
+      });
+    }
+  }catch(e){ console.log('init voice selector error',e); }
+}
+// Override bestVoice to use selected voice
+let _origBestVoice = bestVoice;
+bestVoice = function(lang){
+  try{
+    const saved=localStorage.getItem('selectedVoice');
+    if(saved && lang && lang.toLowerCase().startsWith('en')){
+      const v=ttsV.find(v=>v.name===saved);
+      if(v) return v;
+    }
+    return _origBestVoice(lang);
+  }catch(e){ return _origBestVoice(lang); }
+};
+
+
 dirWeight=loadI(DW,50);
 g('dirSlider').value=dirWeight;
 g('dirPct').textContent=dirWeight+'%';
 autoSpeak=loadB(ASP);updASP();
+try{ setTimeout(initVoiceSelector, 400); }catch(e){}
 repeatSentence=loadB(RPT);updRPT();
 mcMode=loadB(MCK);updMC();
 freeMode=loadB(FRK);updFree();
