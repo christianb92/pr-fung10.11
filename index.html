@@ -626,14 +626,13 @@ input[type=range]{width:100%;accent-color:var(--accent);}
       <span class="t-state" id="freeState">Aus</span>
     </button>
   
-  <!-- NEU: Stimme besser machen - sichere extra Karte -->
+  <!-- Stimme wählen: nur die 3 besten gefundenen Stimmen, statt einer langen, verwirrenden Liste -->
   <div class="card" style="margin-bottom:10px; border:1px solid var(--accent);">
-    <span class="sec-label">🔊 Stimme einstellen (wenn Roboter-Stimme)</span>
-    <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Falls die Stimme noch wie Roboter klingt, wähle hier eine natürlichere:</div>
-    <select id="voiceSelect" style="width:100%; padding:8px; border-radius:8px; margin-bottom:8px; font-size:13px; border:1px solid var(--border);"></select>
-    <div style="display:flex; gap:8px;">
-      <button id="testVoiceBtn" style="flex:1; padding:8px; font-size:13px; border-radius:8px; background:var(--accent); color:white; border:none; cursor:pointer;">🔊 Testen</button>
-      <button id="slowVoiceBtn" style="flex:1; padding:8px; font-size:13px; border-radius:8px; background:var(--card2); border:1px solid var(--border); cursor:pointer;">🐢 Extra langsam</button>
+    <span class="sec-label">🔊 Stimme wählen</span>
+    <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Die App hat diese Stimmen auf deinem Gerät gefunden — antippen zum Testen, dann auswählen:</div>
+    <div id="voiceOptions" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;"></div>
+    <div id="voiceHint" style="font-size:11px; color:var(--muted); line-height:1.5; display:none;">
+      Klingt noch immer nach Roboter? Das liegt am iPhone selbst, nicht an der App: Gehe zu <b>Einstellungen → Bedienungshilfen → Gesprochener Inhalt → Stimmen → Englisch</b> und lade dort eine Stimme mit "Enhanced" oder "Premium" herunter. Das ist der einzige Weg zu einer wirklich natürlichen Stimme auf dem iPhone.
     </div>
   </div>
 
@@ -8975,9 +8974,26 @@ if(window.speechSynthesis){loadVoices();speechSynthesis.onvoiceschanged=loadVoic
 // nutzen diese Namen für ihre "Premium"/"Enhanced"-Qualitätsstufen). Diese
 // werden bevorzugt gesucht, bevor auf irgendeine x-beliebige Stimme
 // zurückgefallen wird — sonst landet man leicht bei einer robotischen.
+// Kategorien nach Qualitätsstufe — absolut oben stehen die Neural-/Siri-Stimmen,
+// darunter die "Enhanced"/"Premium"-Downloads von Apple, dann normale Systemstimmen.
 const PREFERRED_VOICE_NAMES = {
-  en: ['Google US English','Google UK English Female','Samantha','Ava','Aria','Jenny','Natasha','Zira','Microsoft Zira','Karen','Moira','Tessa','Serena','Daniel','Natural','Premium','Enhanced','Online'],
-  de: ['Anna','Petra','Helena','Markus','Google Deutsch','Viktoria','Natural']
+  en: [
+    // Tier 1 — Neural/Siri (die absolut besten, klingen fast menschlich)
+    'Siri','Nicky','Aaron','Zoe','Noelle','Evan','Nathan',
+    'Ava (Premium)','Ava (Enhanced)','Serena (Premium)','Serena (Enhanced)',
+    'Microsoft Aria Online','Microsoft Jenny Online','Microsoft Guy Online',
+    'Microsoft Natasha Online','Google US English','Google UK English Female','Google UK English Male',
+    // Tier 2 — Enhanced/Premium (gute Qualität, oft vorinstalliert)
+    'Ava','Allison','Susan','Samantha','Karen','Moira','Tessa','Fiona','Serena','Daniel','Oliver','Kate',
+    // Tier 3 — generische Marker
+    'Neural','Natural','Premium','Enhanced','Online'
+  ],
+  de: [
+    'Siri','Anna (Premium)','Anna (Enhanced)','Helena (Premium)','Petra (Premium)',
+    'Microsoft Katja Online','Microsoft Conrad Online','Google Deutsch',
+    'Anna','Petra','Helena','Markus','Viktoria',
+    'Neural','Natural','Premium','Enhanced','Online'
+  ]
 };
 function bestVoice(lang){
   if(!ttsV.length)loadVoices();
@@ -11132,99 +11148,127 @@ g('btnCloseProgress').addEventListener('click',()=>{
 
 // ── Init ───────────────────────────────────────────────────────
 
-// === NEU: Voice Selector - verbessert Stimme deutlich ===
-function getAllEnglishVoices(){
+// === Stimmenauswahl: zeigt nur die 3 besten gefundenen Stimmen, nicht die ganze Geräteliste ===
+function getEnglishVoices(){
   try{
     if(!ttsV.length && window.speechSynthesis) ttsV=speechSynthesis.getVoices();
-    return ttsV.filter(v=>v.lang && v.lang.toLowerCase().startsWith('en')).sort((a,b)=>a.name.localeCompare(b.name));
+    return ttsV.filter(v=>v.lang && v.lang.toLowerCase().startsWith('en'));
   }catch(e){ return []; }
 }
-function populateVoices(){
+// Bewertet jede gefundene Stimme: bekannte hochwertige Namen und "Enhanced"/
+// "Premium"/"Neural"-Kennzeichnungen bekommen einen hohen Score, alles
+// andere einen niedrigen. So landen die besten 3 Stimmen oben, egal wie
+// viele Stimmen das Gerät insgesamt hat.
+// Bewertung: je höher der Score, desto natürlicher/hochwertiger die Stimme.
+// Neural/Siri > Premium/Enhanced Downloads > normale Systemstimmen > Rest.
+function scoreVoice(v){
+  let s=0;
+  const n=v.name.toLowerCase();
+  // Tier 1 — Neural/Siri (klingt fast menschlich)
+  if(/neural|siri|nicky|aaron|zoe|noelle|evan|nathan/.test(n))s+=100;
+  if(/microsoft.*online|google.*english|google.*deutsch/.test(n))s+=80;
+  // Tier 2 — Enhanced/Premium Downloads
+  if(/\(premium\)|\(enhanced\)/.test(n))s+=60;
+  if(/premium|enhanced/.test(n))s+=40;
+  // Tier 3 — bekannte gute Systemstimmen
+  if(/samantha|ava|allison|karen|moira|tessa|fiona|serena|daniel|oliver|kate|anna|helena|petra/.test(n))s+=20;
+  // Weitere Bonus/Malus
+  if(/natural|online/.test(n))s+=15;
+  if(v.lang && (v.lang.toLowerCase()==='en-us'||v.lang.toLowerCase()==='en-gb'))s+=5;
+  if(v.localService===false)s+=8; // Online-Stimmen sind meist natürlicher
+  // Explizit robotische Stimmen abwerten (Fred, Albert, Bad News, etc. auf macOS/iOS)
+  if(/fred|albert|bad news|good news|bahh|bells|boing|bubbles|cellos|deranged|hysterical|pipe organ|trinoids|whisper|zarvox|kathy|princess|junior|ralph|vicki|victoria/.test(n))s-=50;
+  return s;
+}
+// Erkennt die Qualitätsstufe für die Anzeige beim User
+function voiceQuality(v){
+  const n=v.name.toLowerCase();
+  if(/neural|siri|nicky|aaron|zoe|noelle|evan|nathan|microsoft.*online|google.*english|google.*deutsch/.test(n))return 'Neural (beste)';
+  if(/premium|enhanced/.test(n))return 'Premium';
+  if(/samantha|ava|allison|karen|moira|tessa|fiona|serena|daniel|oliver|kate|anna|helena|petra/.test(n))return 'Standard';
+  return 'einfach';
+}
+function top3Voices(){
+  const voices=getEnglishVoices();
+  const seen=new Set();
+  const unique=voices.filter(v=>{if(seen.has(v.name))return false;seen.add(v.name);return true;});
+  unique.sort((a,b)=>scoreVoice(b)-scoreVoice(a));
+  return unique.slice(0,3);
+}
+function renderVoiceOptions(){
   try{
-    const sel=document.getElementById('voiceSelect');
-    if(!sel) return;
-    const voices=getAllEnglishVoices();
-    if(!voices.length){
-      setTimeout(populateVoices, 500);
+    const box=document.getElementById('voiceOptions');
+    const hint=document.getElementById('voiceHint');
+    if(!box)return;
+    const top3=top3Voices();
+    if(!top3.length){
+      box.innerHTML='<div style="font-size:12px;color:var(--muted);">Stimmen werden geladen…</div>';
+      setTimeout(renderVoiceOptions,500);
       return;
     }
-    sel.innerHTML='';
-    const saved=localStorage.getItem('selectedVoice')||'';
-    voices.forEach(v=>{
-      const opt=document.createElement('option');
-      opt.value=v.name;
-      const isNatural=/natural|premium|enhanced|google|zira|aria|jenny|neural|online/i.test(v.name);
-      opt.textContent=`${v.name} (${v.lang}) ${isNatural?'⭐ natürlich':''}`;
-      if(v.name===saved) opt.selected=true;
-      sel.appendChild(opt);
+    const saved=localStorage.getItem('selectedVoice')||top3[0].name;
+    if(!localStorage.getItem('selectedVoice'))localStorage.setItem('selectedVoice',saved);
+    box.innerHTML='';
+    top3.forEach((v,i)=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;border:1px solid var(--border);cursor:pointer;';
+      row.style.background=(v.name===saved)?'var(--accent-bg,#eef2ff)':'transparent';
+      const radio=document.createElement('input');
+      radio.type='radio';radio.name='voiceChoice';radio.value=v.name;radio.checked=(v.name===saved);
+      radio.id='voiceOpt'+i;
+      const label=document.createElement('label');
+      label.htmlFor=radio.id;
+      label.style.cssText='flex:1;font-size:13px;cursor:pointer;line-height:1.35;';
+      const quality=voiceQuality(v);
+      const qColor=quality==='Neural (beste)'?'#059669':quality==='Premium'?'#0284c7':quality==='Standard'?'#6b7280':'#9ca3af';
+      label.innerHTML='<b>Stimme '+(i+1)+'</b>'+(i===0?' <span style="color:#059669;font-size:11px;">(empfohlen)</span>':'')+'<br><span style="font-size:11px;color:'+qColor+';">'+quality+' · '+v.lang+'</span>';
+      const btn=document.createElement('button');
+      btn.textContent='🔊';
+      btn.style.cssText='padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--card2);cursor:pointer;';
+      btn.onclick=(e)=>{e.preventDefault();e.stopPropagation();testVoice(v);};
+      const select=()=>{
+        localStorage.setItem('selectedVoice',v.name);
+        radio.checked=true;
+        [...box.children].forEach(r=>r.style.background='transparent');
+        row.style.background='var(--accent-bg,#eef2ff)';
+        testVoice(v);
+      };
+      row.addEventListener('click',(e)=>{if(e.target!==btn)select();});
+      row.appendChild(radio);row.appendChild(label);row.appendChild(btn);
+      box.appendChild(row);
     });
-    if(!saved && voices.length){
-      const best=bestVoice('en-US');
-      if(best) sel.value=best.name;
-    }
-  }catch(e){ console.log('voice error',e); }
+    if(hint)hint.style.display='';
+  }catch(e){ console.log('voice render error',e); }
+}
+function testVoice(v){
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance('Hello! This is how this voice sounds for learning English.');
+    u.voice=v;u.lang='en-US';u.rate=0.70;u.pitch=1.08;
+    speechSynthesis.speak(u);
+  }catch(e){}
 }
 function initVoiceSelector(){
   try{
-    populateVoices();
+    renderVoiceOptions();
     if(window.speechSynthesis){
-      window.speechSynthesis.onvoiceschanged=populateVoices;
-      setTimeout(populateVoices, 600);
-    }
-    const sel=document.getElementById('voiceSelect');
-    if(sel){
-      sel.addEventListener('change',()=>{
-        localStorage.setItem('selectedVoice', sel.value);
-        const voices=ttsV;
-        const chosen=voices.find(v=>v.name===sel.value);
-        if(chosen){
-          const u=new SpeechSynthesisUtterance('Hello, this voice is much more natural for learning English!');
-          u.voice=chosen; u.lang='en-US'; u.rate=0.70; u.pitch=1.08;
-          speechSynthesis.cancel(); speechSynthesis.speak(u);
-        }
-      });
-    }
-    const testBtn=document.getElementById('testVoiceBtn');
-    if(testBtn){
-      testBtn.addEventListener('click',()=>{
-        const sel=document.getElementById('voiceSelect');
-        let chosen=null;
-        if(sel && sel.value) chosen=ttsV.find(v=>v.name===sel.value);
-        if(!chosen) chosen=bestVoice('en-US');
-        if(chosen){
-          const u=new SpeechSynthesisUtterance('Hello! I am learning English and this voice sounds much more natural and slower for beginners.');
-          u.voice=chosen; u.lang='en-US'; u.rate=0.70; u.pitch=1.08;
-          speechSynthesis.cancel(); speechSynthesis.speak(u);
-        }
-      });
-    }
-    const slowBtn=document.getElementById('slowVoiceBtn');
-    if(slowBtn){
-      slowBtn.addEventListener('click',()=>{
-        const sel=document.getElementById('voiceSelect');
-        let chosen=null;
-        if(sel && sel.value) chosen=ttsV.find(v=>v.name===sel.value);
-        if(!chosen) chosen=bestVoice('en-US');
-        if(chosen){
-          const u=new SpeechSynthesisUtterance('Extra slow. Hello. I. Am. Learning. English. Very. Slowly. For. Beginners.');
-          u.voice=chosen; u.lang='en-US'; u.rate=0.55; u.pitch=1.0;
-          speechSynthesis.cancel(); speechSynthesis.speak(u);
-        }
-      });
+      window.speechSynthesis.onvoiceschanged=renderVoiceOptions;
     }
   }catch(e){ console.log('init voice selector error',e); }
 }
-// Override bestVoice to use selected voice
-let _origBestVoice = bestVoice;
+// bestVoice() nutzt jetzt zuerst die gespeicherte Auswahl aus dem Stimmen-Menü,
+// fällt aber sauber auf die ursprüngliche Logik zurück, falls nichts gespeichert
+// ist oder die gespeicherte Stimme auf diesem Gerät nicht (mehr) existiert.
+const _origBestVoice = bestVoice;
 bestVoice = function(lang){
   try{
     const saved=localStorage.getItem('selectedVoice');
     if(saved && lang && lang.toLowerCase().startsWith('en')){
-      const v=ttsV.find(v=>v.name===saved);
+      const v=ttsV.find(vv=>vv.name===saved);
       if(v) return v;
     }
-    return _origBestVoice(lang);
-  }catch(e){ return _origBestVoice(lang); }
+  }catch(e){}
+  return _origBestVoice(lang);
 };
 
 
