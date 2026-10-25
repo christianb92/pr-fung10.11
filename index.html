@@ -13651,7 +13651,32 @@ let sessionMaxT=''; // längster bisher in DIESER laufenden Recognition-Sitzung 
 // vollen 2 Sekunden abwartete, sondern selbst Enter drückte.
 let answerFromVoice=false;
 let showingTimeoutT=null; // Sicherheitsnetz: automatisch weiter nach Stille, auch ohne Auto-Vorlesen
-const PAUSE_MS=2000;
+const PAUSE_MS=1600;
+// Früh-Abschluss: passt das bisher Erkannte (inkl. aller Alternativen) schon zur Lösung,
+// nicht die volle Sprechpause abwarten, sondern fast sofort prüfen — fühlt sich flüssiger an.
+function voiceEarlyOK(){
+  try{
+    const card=queue[idx];if(!card)return false;
+    if(phase!=='input'&&phase!=='sentence')return false;
+    const cands=voiceCandidates();
+    if(mode==='words'&&!freeMode){
+      const target=dir==='de_to_en'?card.en:card.de;
+      return cands.some(c=>c&&fuzzy(c,target,true));
+    }
+    if(mode==='sentence'||mode==='listen'){
+      const st=(mode==='sentence'&&dir==='en_to_de')?card.exDe:card.exEn;
+      return cands.some(c=>c&&checkSentence(c,st,true));
+    }
+  }catch(e){}
+  return false;
+}
+function voicePauseMs(){
+  try{
+    if(phase==='repeat'&&repWords.length&&repMatched>=repWords.length)return 450;
+    if(voiceEarlyOK())return (mode==='words')?450:700;
+  }catch(e){}
+  return PAUSE_MS;
+}
 
 function neededLang(){
   if(phase==='repeat')return'en-US';
@@ -13744,7 +13769,7 @@ function startRec(){
     if(phase==='input'||phase==='sentence'){g('answerInput').value=liveText;answerFromVoice=true;}
     if(phase==='repeat')updateRepeatHL(liveText);
     if(pauseT)clearTimeout(pauseT);
-    pauseT=setTimeout(onPause,PAUSE_MS);
+    pauseT=setTimeout(onPause,voicePauseMs());
   };
   r.onerror=e=>{
     if(rec!==r)return;
@@ -14208,7 +14233,10 @@ function fuzzy(input,target,lenient){
     return parts.some(p=>{
       const pn=n(p);
       if(!pn)return false;
-      return levAccent(text,pn)<=typos(pn.length,lenient);
+      if(levAccent(text,pn)<=typos(pn.length,lenient))return true;
+      // Leerzeichen-tolerant: "e commerce" = "ecommerce", "break even" = "breakeven"
+      const ts=text.replace(/\s+/g,''),ps=pn.replace(/\s+/g,'');
+      return (ts!==text||ps!==pn)&&levAccent(ts,ps)<=typos(ps.length,lenient);
     });
   }
 
@@ -15163,18 +15191,32 @@ function renderRepeatWords(target,exDe){
   g('exBox').className='ex-box show';
 }
 
-function updateRepeatHL(spoken){
-  const n=s=>s.toLowerCase().replace(/[.,!?;:]/g,'').trim();
+function repMatchCount(spoken){
+  const n=s=>s.toLowerCase().replace(/[.,!?;:'"]/g,'').trim();
   const sw=n(spoken).split(/\s+/).filter(Boolean);
-  const spans=g('exEn').querySelectorAll('.rep-word');
-  let matched=0;const pool=[...sw];
+  let matched=0,skips=0;const pool=[...sw];
   for(let i=0;i<repWords.length;i++){
-    const tw=n(repWords[i]),tol=typos(tw.length);
+    const tw=n(repWords[i]),tol=Math.max(typos(tw.length,true),1);
     let best=-1,bestD=Infinity;
     for(let j=0;j<pool.length;j++){const d=levAccent(tw,pool[j]);if(d<bestD){bestD=d;best=j;}}
-    if(best>=0&&(bestD===0||bestD<=Math.max(tol,1))){matched++;pool.splice(best,1);}
+    if(best>=0&&(bestD===0||bestD<=tol)){matched++;pool.splice(best,1);}
+    else if(tw.length<=3&&skips<2&&i<repWords.length-1&&pool.length>0&&(()=>{const nx=n(repWords[i+1]),tl=Math.max(typos(nx.length,true),1);return pool.some(w=>levAccent(nx,w)<=tl);})()){matched++;skips++;} // kurzes Funktionswort verschluckt (a, the, to …) — nicht daran hängen bleiben
     else break;
   }
+  return {matched,pool};
+}
+function updateRepeatHL(spoken){
+  const spans=g('exEn').querySelectorAll('.rep-word');
+  // Alle Erkennungs-Alternativen probieren, die mit den meisten Treffern gewinnt
+  let R=repMatchCount(spoken);
+  try{
+    for(const c of voiceCandidates()){
+      if(!c||c===spoken)continue;
+      const r2=repMatchCount(c);
+      if(r2.matched>R.matched)R=r2;
+    }
+  }catch(e){}
+  let matched=R.matched;const pool=R.pool;
   // Wenn nach dem letzten Treffer noch 3+ Wörter übrig sind, die zu
   // KEINEM der nächsten erwarteten Wörter passen, ist klar: der Nutzer
   // ist komplett vom Satz abgekommen (z.B. neu angesetzt, verhaspelt).
